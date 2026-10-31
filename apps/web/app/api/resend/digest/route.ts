@@ -20,6 +20,7 @@ import { extractNameFromEmail } from "../../../../utils/email";
 import { getRuleName } from "@/utils/rule/consts";
 import camelCase from "lodash/camelCase";
 import { createEmailProvider } from "@/utils/email/provider";
+import { hasMailboxCredentials } from "@/utils/email/provider-types";
 import { sleep } from "@/utils/sleep";
 import { withQstashOrInternal } from "@/utils/qstash";
 import {
@@ -128,7 +129,7 @@ async function sendEmail({
     throw new Error("Email account not found");
   }
 
-  if (!emailAccount.account.refresh_token) {
+  if (!hasMailboxCredentials(emailAccount.account)) {
     logger.warn("Skipping digest: account has no refresh token");
     return { success: false, message: "Account has no refresh token" };
   }

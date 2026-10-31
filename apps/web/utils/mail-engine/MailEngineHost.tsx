@@ -41,7 +41,10 @@ import {
   selectMailEngineRuntimeMode,
   shouldStartMailEngine,
 } from "@/utils/mail-engine/runtime-mode";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import {
+  isImapProvider,
+  isMicrosoftProvider,
+} from "@/utils/email/provider-types";
 import { fetchEmailAccounts } from "@/utils/fetch-email-accounts";
 import { followMailboxChanges } from "@/utils/mail-engine/follow-mailbox-changes";
 import { browserMailEngineCapabilities } from "@/utils/mail-engine/worker-protocol";
@@ -100,6 +103,7 @@ export function MailEngineHost({ children }: { children: ReactNode }) {
 
 export function MailCoverageGate({ children }: { children: ReactNode }) {
   const status = useContext(MailEngineRuntimeStatusContext);
+  const { provider } = useAccount();
   // SSR has no OPFS; checking capabilities before hydration paints the
   // storage-error shell instead of the shared loading state.
   const isClient = useSyncExternalStore(
@@ -110,6 +114,24 @@ export function MailCoverageGate({ children }: { children: ReactNode }) {
 
   if (!isClient) {
     return <LoadingContent loading>{null}</LoadingContent>;
+  }
+  // The local mail engine syncs through the Gmail and Outlook change APIs,
+  // which have no IMAP counterpart yet.
+  if (isImapProvider(provider)) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <AlertCircle />
+          </EmptyMedia>
+          <EmptyTitle>Mail isn’t available for IMAP accounts yet</EmptyTitle>
+          <EmptyDescription>
+            Rules, bulk unsubscribe and the assistant work with this account.
+            Read and write mail in your usual mail app.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
   const mode = selectMailEngineRuntimeMode({
     desktopIpc: hasDesktopMailEngineIpc(),
@@ -157,11 +179,13 @@ function MailEngineRuntimeInner({ children }: { children: ReactNode }) {
   );
   const [browserRequested, setBrowserRequested] = useState(false);
   const requestBrowserEngine = useCallback(() => setBrowserRequested(true), []);
-  const enabled = shouldStartMailEngine({
-    pathname,
-    desktopIpc,
-    browserRequested,
-  });
+  const enabled =
+    !isImapProvider(provider) &&
+    shouldStartMailEngine({
+      pathname,
+      desktopIpc,
+      browserRequested,
+    });
   const [client, setClient] = useState<MailClient | null>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);

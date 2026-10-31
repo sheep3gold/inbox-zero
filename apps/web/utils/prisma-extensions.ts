@@ -16,6 +16,7 @@ const ENCRYPTED_FIELDS = {
   account: ["access_token", "refresh_token"],
   calendarConnection: ["accessToken", "refreshToken"],
   driveConnection: ["accessToken", "refreshToken"],
+  imapCredential: ["password"],
   messagingChannel: ["accessToken", "refreshToken"],
   mcpConnection: ["accessToken", "refreshToken", "apiKey"],
   mcpIntegration: ["oauthClientSecret"],

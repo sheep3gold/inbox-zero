@@ -31,9 +31,36 @@ model Account {
   session_state         String?
   user                  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   emailAccount          EmailAccount?
+  imapCredential        ImapCredential?
 
   @@unique([provider, providerAccountId])
   @@index([userId])
+}
+
+// Connection settings for accounts with provider "imap". The password is
+// encrypted with encryptToken().
+model ImapCredential {
+  id                String    @id @default(cuid())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  imapHost          String
+  imapPort          Int       @default(993)
+  imapSecurity      String    @default("tls") // "tls" | "starttls"
+  smtpHost          String
+  smtpPort          Int       @default(465)
+  smtpSecurity      String    @default("tls") // "tls" | "starttls"
+  username          String
+  password          String    @db.Text
+  // Poll state: the highest UID already handed to the rule engine, scoped to
+  // the folder's UIDVALIDITY so a server-side reset starts over cleanly.
+  inboxUidValidity  BigInt?
+  inboxLastUid      Int?
+  sentUidValidity   BigInt?
+  sentLastUid       Int?
+  lastPolledAt      DateTime?
+  lastPollError     String?
+  accountId         String    @unique
+  account           Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
 }
 
 model Session {

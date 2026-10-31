@@ -50,6 +50,7 @@ export function LoginForm({
   const showMicrosoftLogin =
     !otherOptions && enabledProviders.includes("microsoft");
   const showSsoLogin = showOtherOptions && enabledProviders.includes("sso");
+  const showPasswordLogin = enabledProviders.includes("password");
 
   const [loadingApple, setLoadingApple] = useState(false);
   const [loadingGoogle, setLoadingGoogle] = useState(false);
@@ -141,6 +142,16 @@ export function LoginForm({
             <span className="ml-2">Sign in with Microsoft</span>
           </span>
         </Button>
+      ) : null}
+
+      {showPasswordLogin && !otherOptions ? (
+        <UIButton variant="outline" size="lg" asChild>
+          <Link
+            href={buildRedirectUrl("/login/password", { next: callbackURL })}
+          >
+            Sign in with email and password
+          </Link>
+        </UIButton>
       ) : null}
 
       {showAppleLogin ? (

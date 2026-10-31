@@ -220,7 +220,7 @@ async function runHttpArchiveSlice(input: {
   const store = await createSqliteMailStore(createNodeSqliteDriver());
   await store.ensureAccount({
     accountId: input.accountId,
-    provider: input.provider.name,
+    provider: input.provider.name as "google" | "microsoft",
     generation: "gen-1",
   });
   const engine = createMailEngine({

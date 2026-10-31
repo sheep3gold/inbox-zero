@@ -419,6 +419,12 @@ const parsedEnv = createEnv({
     APP_REVIEW_DEMO_ENABLED: booleanString.optional().default(false),
     APP_REVIEW_DEMO_ACCOUNTS: z.string().optional(),
     SSO_LOGIN_ENABLED: booleanString.optional().default(false),
+    // Email and password sign-in, for self-hosted instances whose users only
+    // connect IMAP mailboxes and have no Google or Microsoft login.
+    PASSWORD_LOGIN_ENABLED: booleanString.optional().default(false),
+    // SECURITY: lets users point IMAP/SMTP settings at private network
+    // addresses. Only for trusted single-tenant self-hosts.
+    IMAP_ALLOW_PRIVATE_HOSTS: booleanString.optional().default(false),
     UNSUBSCRIBE_WORKER_URL: z
       .url()
       .refine((value) => new URL(value).protocol === "https:")

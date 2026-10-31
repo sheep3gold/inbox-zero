@@ -156,6 +156,12 @@ services:
         ) &
         (
           while true; do
+            curl -s -o /dev/null -X GET 'http://web:3000/api/cron/imap-poll' -H \"Authorization: Bearer $${CRON_SECRET}\" || echo \"[cron] Warning: imap-poll request failed\"
+            sleep $${IMAP_POLL_INTERVAL_SECONDS:-60}
+          done
+        ) &
+        (
+          while true; do
             echo \"[cron] Renewing email watches...\"
             curl -s -X GET 'http://web:3000/api/watch/all' -H \"Authorization: Bearer $${CRON_SECRET}\" || echo \"[cron] Warning: watch request failed\"
             sleep 21600

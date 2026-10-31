@@ -15,6 +15,7 @@ import {
   encodeMailboxSyncCursor,
   InvalidMailboxSyncCursorError,
 } from "@/utils/email/mailbox-sync";
+import { SafeError } from "@/utils/error";
 import type { EmailProvider, ProviderMailboxSearch } from "@/utils/email/types";
 import {
   parsedMessageMetadata,
@@ -140,7 +141,7 @@ export function createEmailProviderMailboxSource(input: {
         });
         const { changes, requiredHydration, bodies } = enumeratedObservations(
           accountId,
-          provider.name,
+          mailCoreProvider(provider),
           syncPage.messages,
         );
         if (syncPage.nextPageToken) {
@@ -202,7 +203,11 @@ export function createEmailProviderMailboxSource(input: {
         }
         const patches = page.upsertedMessages.flatMap(
           (message) =>
-            parsedMessagePatch(accountId, provider.name, message) ?? [],
+            parsedMessagePatch(
+              accountId,
+              mailCoreProvider(provider),
+              message,
+            ) ?? [],
         );
         return {
           status: "page" as const,
@@ -258,7 +263,11 @@ export function createEmailProviderMailboxSource(input: {
         const changes: ProviderChange[] = [];
         const bodies: BodyObservation[] = [];
         for (const message of messages) {
-          const patch = parsedMessagePatch(accountId, provider.name, message);
+          const patch = parsedMessagePatch(
+            accountId,
+            mailCoreProvider(provider),
+            message,
+          );
           if (!patch) continue;
           changes.push(patch);
           if (purpose === "body") bodies.push(hydratedBody(accountId, message));
@@ -290,7 +299,11 @@ export function createEmailProviderMailboxSource(input: {
           .slice(start, start + pageSize)
           .flatMap(
             (message) =>
-              parsedMessagePatch(accountId, provider.name, message) ?? [],
+              parsedMessagePatch(
+                accountId,
+                mailCoreProvider(provider),
+                message,
+              ) ?? [],
           );
         return {
           status: "ok",
@@ -686,4 +699,12 @@ function toGmailDeltaCursor(cursor: string): string {
     historyId: decoded.historyId,
     after: decoded.after,
   });
+}
+
+/** The Mail client protocol only knows the OAuth providers. */
+function mailCoreProvider(provider: EmailProvider): Provider {
+  if (provider.name === "imap") {
+    throw new SafeError("The Mail client isn't available for IMAP accounts");
+  }
+  return provider.name;
 }

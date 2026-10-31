@@ -1,6 +1,7 @@
 import type { EmailLabel, EmailLabels } from "@/providers/email-label-types";
 import {
   isGoogleProvider,
+  isImapProvider,
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
 import { isDefined } from "@/utils/types";
@@ -99,7 +100,7 @@ function shouldShowArchivedLabel({
   if (!labelIds) return false;
   if (labels?.some((label) => label.id === OutlookLabel.ARCHIVE)) return false;
 
-  if (isGoogleProvider(provider)) {
+  if (isGoogleProvider(provider) || isImapProvider(provider)) {
     return !labelIds.includes(GmailLabel.INBOX);
   }
 

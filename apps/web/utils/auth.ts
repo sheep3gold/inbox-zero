@@ -267,7 +267,8 @@ export const betterAuthConfig = betterAuth({
   ],
   secret: env.AUTH_SECRET || env.NEXTAUTH_SECRET,
   emailAndPassword: {
-    enabled: false,
+    enabled: env.PASSWORD_LOGIN_ENABLED,
+    minPasswordLength: 10,
   },
   database: prismaAdapter(prisma, {
     provider: "postgresql",

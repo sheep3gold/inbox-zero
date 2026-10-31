@@ -13,6 +13,8 @@ import type {
   BodyObservation,
   ProviderChange,
 } from "@inboxzero/mail-core/sync";
+import type { Provider } from "@inboxzero/mail-core/identities";
+import { SafeError } from "@/utils/error";
 import type { EmailProvider } from "@/utils/email/types";
 import {
   parsedMessageBodyObservation,
@@ -119,7 +121,11 @@ async function executeMetadataPerTarget(
       await applyChange(provider, operation.intent.change, [target.messageId]);
       try {
         const message = await provider.getMessage(target.messageId);
-        const patch = parsedMessagePatch(accountId, provider.name, message);
+        const patch = parsedMessagePatch(
+          accountId,
+          mailCoreProvider(provider),
+          message,
+        );
         if (patch) observations.push(patch);
         if (!metadataChangeSatisfied(message, operation.intent.change)) {
           targets.push({
@@ -168,7 +174,11 @@ async function observeAppliedMetadata(
     for (const target of batch) {
       const message = messagesById.get(target.messageId);
       if (message) {
-        const patch = parsedMessagePatch(accountId, provider.name, message);
+        const patch = parsedMessagePatch(
+          accountId,
+          mailCoreProvider(provider),
+          message,
+        );
         if (patch) observations.push(patch);
         if (!metadataChangeSatisfied(message, operation.intent.change)) {
           targets.push({
@@ -217,7 +227,11 @@ async function inspectMetadataOperation(
   for (const target of operation.intent.targets) {
     try {
       const message = await provider.getMessage(target.messageId);
-      const patch = parsedMessagePatch(accountId, provider.name, message);
+      const patch = parsedMessagePatch(
+        accountId,
+        mailCoreProvider(provider),
+        message,
+      );
       if (patch) observations.push(patch);
       const satisfied = metadataChangeSatisfied(
         message,
@@ -481,7 +495,7 @@ async function executeSnooze(
         }
         const patch = parsedMessagePatch(
           accountId,
-          provider.name,
+          mailCoreProvider(provider),
           archivedMessage,
         );
         if (patch) observations.push(patch);
@@ -510,7 +524,7 @@ async function executeSnooze(
           }
           const patch = parsedMessagePatch(
             accountId,
-            provider.name,
+            mailCoreProvider(provider),
             archivedMessage,
           );
           if (patch) observations.push(patch);
@@ -939,7 +953,11 @@ async function observeSentMessage(
   if (!messageId) return { observations: [], bodies: [] };
   try {
     const message = await provider.getMessage(messageId);
-    const patch = parsedMessagePatch(accountId, provider.name, message);
+    const patch = parsedMessagePatch(
+      accountId,
+      mailCoreProvider(provider),
+      message,
+    );
     if (!patch) return { observations: [], bodies: [] };
     const body = parsedMessageBodyObservation(accountId, message);
     return { observations: [patch], bodies: body ? [body] : [] };
@@ -964,4 +982,12 @@ function sentMessageIdFromResult(result: unknown) {
     return null;
   }
   return typeof result.messageId === "string" ? result.messageId : null;
+}
+
+/** The Mail client protocol only knows the OAuth providers. */
+function mailCoreProvider(provider: EmailProvider): Provider {
+  if (provider.name === "imap") {
+    throw new SafeError("The Mail client isn't available for IMAP accounts");
+  }
+  return provider.name;
 }

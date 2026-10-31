@@ -5,7 +5,12 @@ import {
   hasMicrosoftOauthConfig,
 } from "@/utils/oauth/provider-config";
 
-export type LoginProvider = "google" | "microsoft" | "apple" | "sso";
+export type LoginProvider =
+  | "google"
+  | "microsoft"
+  | "apple"
+  | "sso"
+  | "password";
 
 export function getEnabledLoginProviders(
   inputs: {
@@ -13,6 +18,7 @@ export function getEnabledLoginProviders(
     hasMicrosoftConfig?: boolean;
     hasAppleConfig?: boolean;
     ssoLoginEnabled?: boolean;
+    passwordLoginEnabled?: boolean;
   } = {},
 ): ReadonlySet<LoginProvider> {
   const {
@@ -20,6 +26,7 @@ export function getEnabledLoginProviders(
     hasMicrosoftConfig = hasMicrosoftOauthConfig(),
     hasAppleConfig = hasAppleOauthConfig(),
     ssoLoginEnabled = env.SSO_LOGIN_ENABLED,
+    passwordLoginEnabled = env.PASSWORD_LOGIN_ENABLED,
   } = inputs;
 
   const enabled = new Set<LoginProvider>();
@@ -35,6 +42,9 @@ export function getEnabledLoginProviders(
   }
   if (ssoLoginEnabled) {
     enabled.add("sso");
+  }
+  if (passwordLoginEnabled) {
+    enabled.add("password");
   }
 
   return enabled;

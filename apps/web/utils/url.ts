@@ -142,6 +142,19 @@ const PROVIDER_CONFIG: Record<string, ProviderUrlConfig> = {
     },
   },
   google: GOOGLE_CONFIG,
+  // IMAP ids mean nothing to a webmail UI, so links open the provider's webmail.
+  imap: {
+    requiresMessageId: false,
+    buildUrl: (_messageOrThreadId: string, emailAddress?: string | null) =>
+      getImapWebmailUrl(emailAddress),
+    buildDraftUrl: () => null,
+    selectId: (messageId: string, _threadId: string) => messageId,
+    buildSearchUrl: (
+      _field: SearchField,
+      _address: string,
+      emailAddress?: string | null,
+    ) => getImapWebmailUrl(emailAddress),
+  },
   default: {
     ...GOOGLE_CONFIG,
     selectId: (_messageId: string, threadId: string) => threadId,
@@ -273,4 +286,24 @@ export function getGmailBasicSearchUrl(emailAddress: string, query: string) {
 
 export function getGmailFilterSettingsUrl(emailAddress?: string | null) {
   return getGmailUrlForFragment("settings/filters", emailAddress);
+}
+
+const IMAP_WEBMAIL_BY_DOMAIN: Record<string, string> = {
+  "gmail.com": "https://mail.google.com/",
+  "googlemail.com": "https://mail.google.com/",
+  "qq.com": "https://mail.qq.com/",
+  "foxmail.com": "https://mail.qq.com/",
+  "163.com": "https://mail.163.com/",
+  "icloud.com": "https://www.icloud.com/mail",
+  "fastmail.com": "https://app.fastmail.com/",
+};
+
+function getImapWebmailUrl(emailAddress?: string | null) {
+  const domain = emailAddress?.split("@")[1]?.toLowerCase() ?? "";
+  // Custom domains (for example NetEase Enterprise Mail) can't be mapped
+  // reliably; mail.<domain> is the most common webmail host.
+  return (
+    IMAP_WEBMAIL_BY_DOMAIN[domain] ??
+    (domain ? `https://mail.${domain}/` : "about:blank")
+  );
 }

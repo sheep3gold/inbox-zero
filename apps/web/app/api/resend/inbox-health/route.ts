@@ -22,6 +22,7 @@ import {
 import { createEmailProvider } from "@/utils/email/provider";
 import { classifyEmailAccountProviderIssue } from "@/utils/email/provider-health";
 import {
+  hasMailboxCredentials,
   isGoogleProvider,
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
@@ -135,7 +136,7 @@ async function sendEmail({
     }
   }
 
-  if (!emailAccount.account.refresh_token) {
+  if (!hasMailboxCredentials(emailAccount.account)) {
     logger.warn("Skipping inbox health email: account has no refresh token");
     await startNextInboxHealthWindow(emailAccountId);
     return { success: false, message: "Account has no refresh token" };

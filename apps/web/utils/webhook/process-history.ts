@@ -1,7 +1,9 @@
 import {
   isGoogleProvider,
+  isImapProvider,
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
+import { pollImapAccount } from "@/utils/imap/poll";
 import type { Logger } from "@/utils/logger";
 import { processHistoryForUser as processGoogleHistoryForUser } from "@/utils/webhook/google/process-history";
 import { processHistoryForUser as processOutlookHistoryForUser } from "@/utils/webhook/outlook/process-history";
@@ -78,6 +80,15 @@ export async function processProviderHistory({
     return;
   }
 
+  if (isImapProvider(provider)) {
+    // IMAP has no history API; a poll picks up whatever arrived since the last one.
+    await pollImapAccount({
+      emailAccountId: await getEmailAccountIdOrThrow(emailAddress),
+      logger,
+    });
+    return;
+  }
+
   throw new Error(`Unsupported provider: ${provider}`);
 }
 
@@ -88,7 +99,7 @@ async function getEmailAccountIdOrThrow(emailAddress: string) {
   });
 
   if (!emailAccount) {
-    throw new Error("Email account not found for Outlook history processing");
+    throw new Error("Email account not found for history processing");
   }
 
   return emailAccount.id;

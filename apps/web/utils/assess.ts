@@ -10,6 +10,8 @@ import { isEmailProviderRateLimitError } from "@/utils/email/is-provider-rate-li
 const DEFAULT_LABEL_COUNT: Record<EmailProvider["name"], number> = {
   google: 13,
   microsoft: 8,
+  // INBOX, Sent, Drafts, Trash, Junk and usually Archive.
+  imap: 6,
 };
 
 export async function assessUser({

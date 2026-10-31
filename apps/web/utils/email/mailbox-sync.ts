@@ -19,9 +19,19 @@ const microsoftCursorSchema = z.object({
   snapshot: z.boolean(),
 });
 
+const imapCursorSchema = z.object({
+  version: z.literal(1),
+  provider: z.literal("imap"),
+  folder: z.string().min(1),
+  uidValidity: z.string().regex(/^\d+$/),
+  lastUid: z.number().int().nonnegative(),
+  after: z.string().datetime(),
+});
+
 const cursorSchema = z.discriminatedUnion("provider", [
   gmailCursorSchema,
   microsoftCursorSchema,
+  imapCursorSchema,
 ]);
 
 export type MailboxSyncCursor = z.infer<typeof cursorSchema>;
