@@ -51,6 +51,7 @@ export function LoginForm({
     !otherOptions && enabledProviders.includes("microsoft");
   const showSsoLogin = showOtherOptions && enabledProviders.includes("sso");
   const showPasswordLogin = enabledProviders.includes("password");
+  const showRedirectSso = enabledProviders.includes("redirect-sso");
 
   const [loadingApple, setLoadingApple] = useState(false);
   const [loadingGoogle, setLoadingGoogle] = useState(false);
@@ -142,6 +143,18 @@ export function LoginForm({
             <span className="ml-2">Sign in with Microsoft</span>
           </span>
         </Button>
+      ) : null}
+
+      {showRedirectSso && !otherOptions ? (
+        <UIButton size="lg" asChild>
+          <a
+            href={buildRedirectUrl("/api/auth/redirect-sso/start", {
+              next: callbackURL,
+            })}
+          >
+            Sign in with single sign-on
+          </a>
+        </UIButton>
       ) : null}
 
       {showPasswordLogin && !otherOptions ? (

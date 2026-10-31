@@ -1,6 +1,7 @@
 import { mcpOAuthPlugins } from "@/utils/mcp/oauth-provider";
 import { INITIAL_MAIL_SPLITS } from "@/utils/split-inbox/initial-splits";
 import { adminSso } from "@/utils/auth/sso";
+import { getRedirectSsoConfig, redirectSso } from "@/utils/auth/redirect-sso";
 import { scim } from "@better-auth/scim";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import type { GenericOAuthConfig } from "better-auth/plugins/generic-oauth";
@@ -211,6 +212,7 @@ const genericOauthConfig: GenericOAuthConfig[] = [
       ]
     : []),
 ];
+const redirectSsoConfig = getRedirectSsoConfig();
 const genericOauthPlugin =
   genericOauthConfig.length > 0
     ? genericOAuth({
@@ -268,6 +270,7 @@ export const betterAuthConfig = betterAuth({
   secret: env.AUTH_SECRET || env.NEXTAUTH_SECRET,
   emailAndPassword: {
     enabled: env.PASSWORD_LOGIN_ENABLED,
+    disableSignUp: !env.PASSWORD_SIGNUP_ENABLED,
     minPasswordLength: 10,
   },
   database: prismaAdapter(prisma, {
@@ -282,6 +285,7 @@ export const betterAuthConfig = betterAuth({
     }),
     ...(env.SCIM_CREDENTIAL_HASH_SECRET ? [scim(getScimOptions())] : []),
     ...(genericOauthPlugin ? [genericOauthPlugin] : []),
+    ...(redirectSsoConfig ? [redirectSso(redirectSsoConfig)] : []),
     ...(mobileAuthOrigins.length > 0 ? [safeExpo()] : []),
     // OAuth proxy for preview deployments (Google doesn't allow wildcard redirect URIs)
     ...(env.OAUTH_PROXY_URL || env.IS_OAUTH_PROXY_SERVER

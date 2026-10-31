@@ -422,6 +422,16 @@ const parsedEnv = createEnv({
     // Email and password sign-in, for self-hosted instances whose users only
     // connect IMAP mailboxes and have no Google or Microsoft login.
     PASSWORD_LOGIN_ENABLED: booleanString.optional().default(false),
+    // Anyone can create an account on the password form unless this is false.
+    PASSWORD_SIGNUP_ENABLED: booleanString.optional().default(true),
+    // Central login page that redirects back with an access token in the URL
+    // fragment and publishes its keys at /.well-known/jwks.json.
+    REDIRECT_SSO_URL: z.string().url().optional(),
+    REDIRECT_SSO_ISSUERS: z.string().optional(),
+    REDIRECT_SSO_AUDIENCE: z.string().optional(),
+    REDIRECT_SSO_REQUIRED_ROLES: z.string().optional(),
+    REDIRECT_SSO_EMAIL_DOMAIN: z.string().optional(),
+    REDIRECT_SSO_SIGNUP_ENABLED: booleanString.optional().default(false),
     // SECURITY: lets users point IMAP/SMTP settings at private network
     // addresses. Only for trusted single-tenant self-hosts.
     IMAP_ALLOW_PRIVATE_HOSTS: booleanString.optional().default(false),

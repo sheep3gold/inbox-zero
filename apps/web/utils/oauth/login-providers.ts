@@ -10,7 +10,8 @@ export type LoginProvider =
   | "microsoft"
   | "apple"
   | "sso"
-  | "password";
+  | "password"
+  | "redirect-sso";
 
 export function getEnabledLoginProviders(
   inputs: {
@@ -19,6 +20,7 @@ export function getEnabledLoginProviders(
     hasAppleConfig?: boolean;
     ssoLoginEnabled?: boolean;
     passwordLoginEnabled?: boolean;
+    redirectSsoEnabled?: boolean;
   } = {},
 ): ReadonlySet<LoginProvider> {
   const {
@@ -27,6 +29,7 @@ export function getEnabledLoginProviders(
     hasAppleConfig = hasAppleOauthConfig(),
     ssoLoginEnabled = env.SSO_LOGIN_ENABLED,
     passwordLoginEnabled = env.PASSWORD_LOGIN_ENABLED,
+    redirectSsoEnabled = !!env.REDIRECT_SSO_URL,
   } = inputs;
 
   const enabled = new Set<LoginProvider>();
@@ -45,6 +48,9 @@ export function getEnabledLoginProviders(
   }
   if (passwordLoginEnabled) {
     enabled.add("password");
+  }
+  if (redirectSsoEnabled) {
+    enabled.add("redirect-sso");
   }
 
   return enabled;
