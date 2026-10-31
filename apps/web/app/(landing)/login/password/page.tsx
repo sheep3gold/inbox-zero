@@ -16,9 +16,11 @@ export default async function PasswordLoginPage({
 }: {
   searchParams: Promise<{ next?: string | string[] }>;
 }) {
+  // Awaiting the request first keeps this page dynamic, so the flag is read
+  // at request time instead of being baked in at build time.
+  const params = await searchParams;
   if (!env.PASSWORD_LOGIN_ENABLED) notFound();
 
-  const params = await searchParams;
   const callbackURL =
     normalizeInternalPath(
       typeof params.next === "string" ? params.next : undefined,
