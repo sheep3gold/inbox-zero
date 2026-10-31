@@ -84,6 +84,11 @@ const nextConfig: NextConfig = {
                 staticGenerationMaxConcurrency:
                   process.env.DOCKER_BUILD === "true" ? 2 : 4,
                 staticGenerationMinPagesPerWorker: 100,
+                // Build workers (page data collection, static generation).
+                // Lower it on small hosts; each worker loads the server bundle.
+                ...(process.env.NEXT_BUILD_CPUS
+                  ? { cpus: Number(process.env.NEXT_BUILD_CPUS) }
+                  : {}),
               }
             : {}),
         }

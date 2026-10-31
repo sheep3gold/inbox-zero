@@ -58,6 +58,9 @@ ENV NODE_ENV=production
 # --build-arg BUILD_NODE_OPTIONS=... on hosts with less memory.
 ARG BUILD_NODE_OPTIONS=--max_old_space_size=8192
 ENV NODE_OPTIONS=${BUILD_NODE_OPTIONS}
+# Number of Next build workers; empty uses Next's default (CPU count - 1).
+ARG NEXT_BUILD_CPUS=""
+ENV NEXT_BUILD_CPUS=${NEXT_BUILD_CPUS}
 # Typechecking is covered by the Build Check workflow. Skipping it here
 # keeps peak RAM down so Depot workers do not OOM during next build.
 ENV SKIP_TYPE_CHECK=true
