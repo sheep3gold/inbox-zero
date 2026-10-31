@@ -425,6 +425,10 @@ const parsedEnv = createEnv({
     // SECURITY: lets users point IMAP/SMTP settings at private network
     // addresses. Only for trusted single-tenant self-hosts.
     IMAP_ALLOW_PRIVATE_HOSTS: booleanString.optional().default(false),
+    // HTTP CONNECT or SOCKS proxy for IMAP/SMTP hosts the server can't reach
+    // directly; IMAP_PROXY_HOSTS lists hosts or ".suffix" entries, or "*".
+    IMAP_PROXY_URL: z.string().url().optional(),
+    IMAP_PROXY_HOSTS: z.string().optional(),
     UNSUBSCRIBE_WORKER_URL: z
       .url()
       .refine((value) => new URL(value).protocol === "https:")

@@ -5,7 +5,7 @@ import { createEmailProvider } from "@/utils/email/provider";
 import type { EmailProvider } from "@/utils/email/types";
 import { canonicalizeEmailAddress } from "@/utils/email";
 import { runWithBoundedConcurrency } from "@/utils/async";
-import { getErrorMessage } from "@/utils/error";
+import { describeError } from "@/utils/imap/connection-test";
 import { acquireOwnedLock, clearOwnedLock } from "@/utils/redis/owned-lock";
 import { withMessageProcessingLock } from "@/utils/redis/message-processing";
 import { processHistoryItem } from "@/utils/webhook/process-history-item";
@@ -65,7 +65,7 @@ export async function pollAllImapAccounts(
       : {
           emailAccountId: item.id,
           processed: 0,
-          error: getErrorMessage(result.reason) ?? "Poll failed",
+          error: describeError(result.reason),
         },
   );
 }
@@ -92,7 +92,7 @@ export async function pollImapAccount({
   try {
     return await pollLocked(emailAccountId, logger);
   } catch (error) {
-    const message = getErrorMessage(error) ?? "Poll failed";
+    const message = describeError(error);
     logger.warn("IMAP poll failed", { error });
     await prisma.imapCredential
       .updateMany({

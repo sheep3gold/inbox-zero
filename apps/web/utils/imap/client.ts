@@ -4,6 +4,7 @@ import type {
   ImapCredentialConfig,
 } from "@/utils/imap/types";
 import { createScopedLogger } from "@/utils/logger";
+import { getMailProxyForHost } from "@/utils/imap/proxy";
 import type { SearchSupport } from "@/utils/imap/search-fallback";
 
 const logger = createScopedLogger("imap/client");
@@ -37,6 +38,7 @@ export function createImapClient(config: ImapConnectionConfig): ImapFlow {
     connectionTimeout: CONNECT_TIMEOUT_MS,
     greetingTimeout: GREETING_TIMEOUT_MS,
     socketTimeout: SOCKET_TIMEOUT_MS,
+    proxy: getMailProxyForHost(config.imapHost),
   });
 }
 

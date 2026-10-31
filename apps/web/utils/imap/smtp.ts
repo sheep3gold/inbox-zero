@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { getMailProxyForHost } from "@/utils/imap/proxy";
 import type { ImapConnectionConfig } from "@/utils/imap/types";
 
 const SMTP_TIMEOUT_MS = 30_000;
@@ -13,6 +14,7 @@ export function createSmtpTransport(config: ImapConnectionConfig) {
     connectionTimeout: SMTP_TIMEOUT_MS,
     greetingTimeout: SMTP_TIMEOUT_MS,
     socketTimeout: SMTP_TIMEOUT_MS,
+    proxy: getMailProxyForHost(config.smtpHost),
   });
 }
 

@@ -67,6 +67,23 @@ async function checkHostAllowed(host: string): Promise<string | null> {
   return null;
 }
 
+/** Socket errors (an AggregateError from dual-stack connects) have no message. */
+function describeNetworkError(error: unknown) {
+  if (typeof error !== "object" || !error) return;
+  const code = "code" in error ? String(error.code ?? "") : "";
+  const inner =
+    "errors" in error && Array.isArray(error.errors)
+      ? error.errors
+          .map((item: { code?: string; address?: string }) =>
+            [item.code, item.address].filter(Boolean).join(" "),
+          )
+          .filter(Boolean)
+      : [];
+  if (!code && !inner.length) return;
+  const detail = inner.length ? ` (${[...new Set(inner)].join(", ")})` : "";
+  return `Could not reach the server: ${code || "network error"}${detail}`;
+}
+
 const PRIVATE_RANGES = [
   /^127\./,
   /^10\./,
@@ -86,8 +103,11 @@ export function isPrivateAddress(address: string) {
   return PRIVATE_RANGES.some((range) => range.test(address));
 }
 
-function describeError(error: unknown) {
-  const message = getErrorMessage(error) ?? "Connection failed";
+export function describeError(error: unknown) {
+  const message =
+    getErrorMessage(error) ||
+    describeNetworkError(error) ||
+    "Connection failed";
   const response =
     typeof error === "object" && error && "responseText" in error
       ? String((error as { responseText?: unknown }).responseText ?? "")
