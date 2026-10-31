@@ -9,11 +9,21 @@ import {
 import {
   decodeMessageId,
   decodeThreadId,
-  encodeThreadId,
   stripAngles,
+  withAngles,
 } from "@/utils/imap/ids";
 import { parseImapMessage, type RawImapMessage } from "@/utils/imap/message";
-import { getRootMessageId, parseMessageIdList } from "@/utils/imap/thread";
+import {
+  CLIENT_FILTER_FETCH_HEADERS,
+  type ClientFilterMessage,
+  FULL_SEARCH_SUPPORT,
+  matchesSearch,
+  needsClientFilter,
+  probeSearchSupport,
+  type SearchSupport,
+  serverPrefilter,
+  withoutServerKeys,
+} from "@/utils/imap/search-fallback";
 import { ImapMessageNotFoundError } from "@/utils/imap/types";
 
 export type MessageFormat = "full" | "metadata";
@@ -24,8 +34,37 @@ export type MessageLocation = {
   rfcMessageId?: string;
 };
 
-// Folders without HEADER search support are scanned instead, newest first.
-const HEADER_SCAN_LIMIT = 500;
+// Newest messages matched locally when the server can't run a search itself.
+// QQ Mail fetches roughly 40 envelopes a second, so keep these small.
+const CLIENT_FILTER_SCAN_LIMIT = 500;
+const THREAD_SCAN_LIMIT = 300;
+const SCAN_CACHE_PER_FOLDER = 3000;
+const SCAN_CACHE_FOLDERS = 200;
+
+// Envelopes and headers never change for a UID, so scans are cached per
+// folder and UIDVALIDITY for the life of the process.
+const scanCaches = new Map<string, Map<number, ClientFilterMessage>>();
+
+function getScanCache(key: string) {
+  let cache = scanCaches.get(key);
+  if (!cache) {
+    cache = new Map();
+    scanCaches.set(key, cache);
+    if (scanCaches.size > SCAN_CACHE_FOLDERS) {
+      const oldest = scanCaches.keys().next().value;
+      if (oldest !== undefined) scanCaches.delete(oldest);
+    }
+  }
+  return cache;
+}
+
+function trimScanCache(cache: Map<number, ClientFilterMessage>) {
+  if (cache.size <= SCAN_CACHE_PER_FOLDER) return;
+  const uids = [...cache.keys()].sort((a, b) => a - b);
+  for (const uid of uids.slice(0, cache.size - SCAN_CACHE_PER_FOLDER)) {
+    cache.delete(uid);
+  }
+}
 const MAX_SEARCH_FOLDERS = 40;
 
 export async function getFolders(session: ImapSession): Promise<FolderMap> {
@@ -72,19 +111,120 @@ export function getSearchFolders(
   return paths.slice(0, MAX_SEARCH_FOLDERS);
 }
 
+/**
+ * UID SEARCH, newest first. Where the server's SEARCH is unreliable for a
+ * key (see probeSearchSupport), the server narrows by the keys it does
+ * handle and the rest is matched locally on the newest messages.
+ */
 export async function searchUids(
   session: ImapSession,
   path: string,
   query: SearchObject,
+  { scanLimit }: { scanLimit?: number } = {},
 ): Promise<number[]> {
+  const support = session.isGmail
+    ? FULL_SEARCH_SUPPORT
+    : await getSearchSupport(session);
+  const clientSide = needsClientFilter(query, support);
   return session.withMailbox(
     path,
     async () => {
-      const result = await session.client.search(query, { uid: true });
-      return (result || []).sort((a, b) => b - a);
+      if (!clientSide) {
+        try {
+          return await serverSearch(session, query);
+        } catch (error) {
+          if (!hasClientFilterableKeys(query)) throw error;
+        }
+      }
+      return clientFilterSearch(session, query, scanLimit);
     },
     { readOnly: true },
   );
+}
+
+async function serverSearch(session: ImapSession, query: SearchObject) {
+  const result = await session.client.search(query, { uid: true });
+  return (result || []).sort((a, b) => b - a);
+}
+
+async function clientFilterSearch(
+  session: ImapSession,
+  query: SearchObject,
+  limit = CLIENT_FILTER_SCAN_LIMIT,
+) {
+  const candidates = (
+    await serverSearch(session, serverPrefilter(query))
+  ).slice(0, limit);
+  if (!candidates.length) return [];
+  const mailbox = session.client.mailbox;
+  if (!mailbox) return [];
+  const cache = getScanCache(
+    `${session.cacheKey}\u0000${mailbox.path}\u0000${mailbox.uidValidity}`,
+  );
+  const missing = candidates.filter((uid) => !cache.has(uid));
+  if (missing.length) {
+    for await (const message of session.client.fetch(
+      missing.join(","),
+      {
+        uid: true,
+        envelope: true,
+        internalDate: true,
+        headers: CLIENT_FILTER_FETCH_HEADERS,
+      },
+      { uid: true },
+    )) {
+      cache.set(message.uid, message);
+    }
+    trimScanCache(cache);
+  }
+  // Flags and dates were already applied by the server prefilter, and cached
+  // flags may be stale, so only the remaining keys are matched here.
+  const localQuery = withoutServerKeys(query);
+  return candidates
+    .filter((uid) => {
+      const message = cache.get(uid);
+      return message ? matchesSearch(localQuery, message) : false;
+    })
+    .sort((a, b) => b - a);
+}
+
+function hasClientFilterableKeys(query: SearchObject) {
+  return needsClientFilter(query, {
+    header: false,
+    address: false,
+    partialAddress: false,
+    subject: false,
+    text: false,
+  });
+}
+
+/** Measured once per connection against the newest INBOX message. */
+function getSearchSupport(session: ImapSession): Promise<SearchSupport> {
+  session.searchSupport ??= session
+    .withMailbox(
+      "INBOX",
+      async (mailbox) => {
+        if (!mailbox.exists) return FULL_SEARCH_SUPPORT;
+        const latest = await session.client.fetchOne(
+          "*",
+          { uid: true, envelope: true },
+          { uid: false },
+        );
+        if (!latest) return FULL_SEARCH_SUPPORT;
+        return probeSearchSupport(
+          {
+            uid: latest.uid,
+            messageId: latest.envelope?.messageId,
+            fromAddress: latest.envelope?.from?.[0]?.address,
+            subject: latest.envelope?.subject,
+          },
+          (probe) => serverSearch(session, probe),
+        );
+      },
+      { readOnly: true },
+    )
+    .catch(() => FULL_SEARCH_SUPPORT);
+  return session.searchSupport;
 }
 
 export async function fetchMessages(
@@ -213,9 +353,10 @@ export async function findByRfcMessageId(
   const wanted = stripAngles(rfcMessageId);
   const locations: MessageLocation[] = [];
   for (const path of paths) {
-    const uids = await searchHeaderWithFallback(session, path, (headers) =>
-      headers.messageIds.includes(wanted),
-    )({ header: { "message-id": wanted } });
+    // NetEase only matches the id with its angle brackets.
+    const uids = await searchUids(session, path, {
+      header: { "message-id": withAngles(wanted) },
+    });
     for (const uid of uids) {
       locations.push({ path, uid, rfcMessageId: wanted });
     }
@@ -239,20 +380,55 @@ export async function findThreadLocations(
 
   const locations: MessageLocation[] = [];
   for (const path of paths) {
-    const uids = await searchHeaderWithFallback(
-      session,
-      path,
-      (headers) => headers.threadId === threadId,
-    )({
-      or: [
-        { header: { "message-id": root } },
-        { header: { references: root } },
-        { header: { "in-reply-to": root } },
-      ],
-    });
-    for (const uid of uids) locations.push({ path, uid });
+    const uids = session.isGmail
+      ? await findGmailThreadUids(session, path, root)
+      : undefined;
+    for (const uid of uids ??
+      (await searchUids(
+        session,
+        path,
+        {
+          or: [
+            { header: { "message-id": withAngles(root) } },
+            { header: { references: withAngles(root) } },
+            { header: { "in-reply-to": withAngles(root) } },
+          ],
+        },
+        { scanLimit: THREAD_SCAN_LIMIT },
+      ))) {
+      locations.push({ path, uid });
+    }
   }
   return locations;
+}
+
+/**
+ * HEADER searches over a large Gmail All Mail take 15s or more. Find the root
+ * by Message-ID (indexed) and take its Gmail thread instead. Returns
+ * undefined when the root isn't in the folder, so the caller falls back.
+ */
+async function findGmailThreadUids(
+  session: ImapSession,
+  path: string,
+  root: string,
+): Promise<number[] | undefined> {
+  return session.withMailbox(
+    path,
+    async () => {
+      const [rootUid] = await serverSearch(session, {
+        gmraw: `rfc822msgid:${root}`,
+      });
+      if (!rootUid) return;
+      const message = await session.client.fetchOne(
+        String(rootUid),
+        { uid: true, threadId: true },
+        { uid: true },
+      );
+      if (message === false || !message.threadId) return;
+      return serverSearch(session, { threadId: message.threadId });
+    },
+    { readOnly: true },
+  );
 }
 
 export function groupByPath(locations: MessageLocation[]) {
@@ -366,68 +542,6 @@ export function sortChronologically(messages: ParsedMessage[]) {
   return [...messages].sort(
     (a, b) => Number(a.internalDate ?? 0) - Number(b.internalDate ?? 0),
   );
-}
-
-type ScannedHeaders = { messageIds: string[]; threadId: string };
-
-/**
- * Runs a HEADER search, and if the server rejects it (some servers only
- * search a few headers), scans the newest messages' headers instead.
- */
-function searchHeaderWithFallback(
-  session: ImapSession,
-  path: string,
-  matches: (headers: ScannedHeaders) => boolean,
-) {
-  return async (query: SearchObject): Promise<number[]> => {
-    try {
-      return await searchUids(session, path, query);
-    } catch {
-      return scanHeaders(session, path, matches);
-    }
-  };
-}
-
-async function scanHeaders(
-  session: ImapSession,
-  path: string,
-  matches: (headers: ScannedHeaders) => boolean,
-): Promise<number[]> {
-  return session.withMailbox(
-    path,
-    async (mailbox) => {
-      if (!mailbox.exists) return [];
-      const start = Math.max(1, mailbox.exists - HEADER_SCAN_LIMIT + 1);
-      const uids: number[] = [];
-      for await (const message of session.client.fetch(`${start}:*`, {
-        uid: true,
-        headers: ["message-id", "references", "in-reply-to"],
-      })) {
-        const headers = parseThreadHeaders(message.headers);
-        if (matches(headers)) uids.push(message.uid);
-      }
-      return uids;
-    },
-    { readOnly: true },
-  );
-}
-
-export function parseThreadHeaders(raw?: Buffer): ScannedHeaders {
-  const text = (raw?.toString("utf8") ?? "").replace(/\r?\n[ \t]+/g, " ");
-  const get = (name: string) =>
-    text
-      .split(/\r?\n/)
-      .find((line) => line.toLowerCase().startsWith(`${name}:`))
-      ?.slice(name.length + 1)
-      .trim();
-  const messageId = get("message-id");
-  const references = get("references");
-  const inReplyTo = get("in-reply-to");
-  const root = getRootMessageId({ references, inReplyTo, messageId });
-  return {
-    messageIds: messageId ? parseMessageIdList(messageId) : [],
-    threadId: root ? encodeThreadId(root) : "",
-  };
 }
 
 function parseUidRoot(root: string): MessageLocation | null {

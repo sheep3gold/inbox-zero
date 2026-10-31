@@ -4,6 +4,7 @@ import type {
   ImapCredentialConfig,
 } from "@/utils/imap/types";
 import { createScopedLogger } from "@/utils/logger";
+import type { SearchSupport } from "@/utils/imap/search-fallback";
 
 const logger = createScopedLogger("imap/client");
 
@@ -44,9 +45,15 @@ export class ImapSession {
   private mailboxes?: { list: ListResponse[]; fetchedAt: number };
 
   readonly client: ImapFlow;
+  /** Which SEARCH keys this server honors; measured on first use. */
+  searchSupport?: Promise<SearchSupport>;
 
-  constructor(client: ImapFlow) {
+  /** Identifies the mailbox for process-wide caches. */
+  readonly cacheKey: string;
+
+  constructor(client: ImapFlow, cacheKey: string) {
     this.client = client;
+    this.cacheKey = cacheKey;
   }
 
   get usable() {
@@ -144,7 +151,9 @@ export async function withImapConnection<T>(
   const client = createImapClient(config);
   await client.connect();
   try {
-    return await fn(new ImapSession(client));
+    return await fn(
+      new ImapSession(client, `${config.username}@${config.imapHost}`),
+    );
   } finally {
     await client.logout().catch(() => client.close());
   }
@@ -193,7 +202,7 @@ async function connectSession(config: ImapCredentialConfig) {
     }
   });
   await client.connect();
-  return new ImapSession(client);
+  return new ImapSession(client, config.emailAccountId);
 }
 
 function release(emailAccountId: string, entry: PoolEntry) {
