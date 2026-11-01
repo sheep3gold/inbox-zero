@@ -368,6 +368,111 @@ describe("createEmailProviderMailboxSource", () => {
     expect(getFolders).toHaveBeenCalled();
   });
 
+  it("exposes IMAP folders as sync scopes", async () => {
+    const getFolders = vi.fn().mockResolvedValue([
+      {
+        id: "INBOX",
+        displayName: "INBOX",
+        systemType: "INBOX",
+        childFolders: [],
+      },
+      {
+        id: "Archive",
+        displayName: "Archive",
+        childFolders: [],
+      },
+    ]);
+    const source = createEmailProviderMailboxSource({
+      accountId: "acc-1",
+      provider: {
+        name: "imap",
+        localMailSyncStrategy: "folder-delta",
+        getFolders,
+      } as unknown as EmailProvider,
+    });
+    const result = await source.discoverScopes({
+      session: { accountId: "acc-1", generation: "g1" },
+      requestId: "r1",
+      page: null,
+      signal: new AbortController().signal,
+    });
+    expect(result).toEqual({
+      status: "ok",
+      value: {
+        scopes: [
+          { id: "INBOX", kind: "folder", folderId: "INBOX", priority: "high" },
+          {
+            id: "Archive",
+            kind: "folder",
+            folderId: "Archive",
+            priority: "low",
+          },
+        ],
+        nextPage: null,
+      },
+    });
+    expect(getFolders).toHaveBeenCalled();
+  });
+
+  it("enumerates IMAP messages with the imap provider reference", async () => {
+    const getMessagesWithPagination = vi.fn().mockResolvedValue({
+      messages: [searchMessage("m1")],
+      nextPageToken: undefined,
+    });
+    const getMailboxSyncPage = vi.fn().mockResolvedValue({
+      cursor: encodeMailboxSyncCursor({
+        version: 1,
+        provider: "imap",
+        folder: "INBOX",
+        uidValidity: "1",
+        lastUid: 1,
+        after: "1970-01-01T00:00:00.000Z",
+      }),
+      reset: false,
+      upsertedMessages: [],
+      deletedMessageIds: [],
+      hasMore: false,
+    });
+    const source = createEmailProviderMailboxSource({
+      accountId: "acc-1",
+      provider: {
+        name: "imap",
+        localMailSyncStrategy: "folder-delta",
+        getMessagesWithPagination,
+        getMailboxSyncPage,
+      } as unknown as EmailProvider,
+    });
+    const bootstrap = await source.beginBootstrap({
+      session: { accountId: "acc-1", generation: "g1" },
+      requestId: "r-bootstrap",
+      signal: new AbortController().signal,
+      scope: { id: "INBOX", kind: "folder", folderId: "INBOX" },
+      afterMs: 0,
+    });
+    expect(bootstrap.status).toBe("ok");
+    if (bootstrap.status !== "ok") throw new Error("expected ok");
+    const page = await source.enumerate({
+      session: { accountId: "acc-1", generation: "g1" },
+      requestId: "r-enum",
+      signal: new AbortController().signal,
+      bootstrapId: bootstrap.value.bootstrapId,
+      page: bootstrap.value.enumerationToken,
+      pageSize: 20,
+    });
+    expect(page.status).toBe("ok");
+    if (page.status !== "ok") throw new Error("expected ok");
+    expect(getMessagesWithPagination).toHaveBeenCalledWith(
+      expect.objectContaining({ folderId: "INBOX" }),
+    );
+    const patch = page.value.changes.find(
+      (change) => change.kind === "message_patch",
+    );
+    expect(patch).toMatchObject({
+      key: { accountId: "acc-1", messageId: "m1" },
+      reference: { provider: "imap", messageId: "m1" },
+    });
+  });
+
   it("enumerates an Outlook folder scope and starts catch-up from its folder cursor", async () => {
     const getMailboxSyncPage = vi.fn().mockResolvedValue({
       cursor: "folder-cursor",

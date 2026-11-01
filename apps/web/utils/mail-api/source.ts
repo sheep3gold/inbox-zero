@@ -15,7 +15,6 @@ import {
   encodeMailboxSyncCursor,
   InvalidMailboxSyncCursorError,
 } from "@/utils/email/mailbox-sync";
-import { SafeError } from "@/utils/error";
 import type { EmailProvider, ProviderMailboxSearch } from "@/utils/email/types";
 import {
   parsedMessageMetadata,
@@ -65,7 +64,9 @@ export function createEmailProviderMailboxSource(input: {
   accountId: string;
 }): MailboxSource & Required<Pick<MailboxSource, "readChangesBatch">> {
   const { provider, accountId } = input;
-  const maxPageSize = provider.name === "microsoft" ? 20 : 50;
+  // IMAP fetches whole messages over a socket-per-folder session; keep pages
+  // small like Outlook's rather than Gmail's 50.
+  const maxPageSize = provider.name === "google" ? 50 : 20;
   const source: MailboxSource = {
     async describe() {
       return {
@@ -82,7 +83,7 @@ export function createEmailProviderMailboxSource(input: {
       };
     },
     async discoverScopes() {
-      if (provider.name === "microsoft") {
+      if (provider.name === "microsoft" || provider.name === "imap") {
         const folders = await provider.getFolders();
         return {
           status: "ok",
@@ -193,7 +194,7 @@ export function createEmailProviderMailboxSource(input: {
         const page = await provider.getMailboxSyncPage({
           cursor: position.checkpoint || undefined,
           folderId:
-            provider.name === "microsoft" && position.streamId !== "primary"
+            provider.name !== "google" && position.streamId !== "primary"
               ? position.streamId
               : undefined,
           limit: pageSize,
@@ -517,7 +518,8 @@ async function finalCatchUpFrom({
 }
 
 function scopedFolderId(provider: EmailProvider, scope: ScopeDescriptor) {
-  if (provider.name === "microsoft") return scope.folderId ?? scope.id;
+  if (provider.name === "microsoft" || provider.name === "imap")
+    return scope.folderId ?? scope.id;
   return scope.folderId ?? undefined;
 }
 
@@ -701,10 +703,6 @@ function toGmailDeltaCursor(cursor: string): string {
   });
 }
 
-/** The Mail client protocol only knows the OAuth providers. */
 function mailCoreProvider(provider: EmailProvider): Provider {
-  if (provider.name === "imap") {
-    throw new SafeError("The Mail client isn't available for IMAP accounts");
-  }
   return provider.name;
 }
