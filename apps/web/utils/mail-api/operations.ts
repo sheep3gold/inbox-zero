@@ -14,7 +14,6 @@ import type {
   ProviderChange,
 } from "@inboxzero/mail-core/sync";
 import type { Provider } from "@inboxzero/mail-core/identities";
-import { SafeError } from "@/utils/error";
 import type { EmailProvider } from "@/utils/email/types";
 import {
   parsedMessageBodyObservation,
@@ -984,10 +983,6 @@ function sentMessageIdFromResult(result: unknown) {
   return typeof result.messageId === "string" ? result.messageId : null;
 }
 
-/** The Mail client protocol only knows the OAuth providers. */
 function mailCoreProvider(provider: EmailProvider): Provider {
-  if (provider.name === "imap") {
-    throw new SafeError("The Mail client isn't available for IMAP accounts");
-  }
   return provider.name;
 }
