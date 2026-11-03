@@ -46,7 +46,7 @@ COPY scripts/pnpm-install-without-desktop.sh scripts/pnpm-install-without-deskto
 # from the workspace instead of following pnpm store symlinks outside package
 # peer dependency boundaries. Skip @inboxzero/desktop so the image does not
 # download Electron.
-RUN chmod +x scripts/pnpm-install-without-desktop.sh \
+RUN pnpm config set network-concurrency 8 && pnpm config set fetch-timeout 180000 && chmod +x scripts/pnpm-install-without-desktop.sh \
  && ./scripts/pnpm-install-without-desktop.sh --frozen-lockfile --prefer-offline --config.node-linker=hoisted
 
  # Copy the full repo
@@ -156,7 +156,12 @@ COPY docker/scripts /app/docker/scripts
 RUN chmod +x /app/docker/scripts/*.sh
 
 # Install the Prisma CLI for migrations at the app's version so new schema
-# features are understood by `migrate deploy`
+# features are understood by `migrate deploy`. ARGs are stage-scoped, so the
+# proxy must be re-declared here for npm to pick it up from the environment.
+ARG http_proxy
+ARG https_proxy
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
 COPY apps/web/package.json /tmp/web-package.json
 RUN npm install -g "prisma@$(node -p "require('/tmp/web-package.json').dependencies.prisma")" \
  && rm /tmp/web-package.json
