@@ -14,6 +14,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { emailMessageContextSchema } from "@/utils/ai/assistant/chat-context-validation";
+import { latestShownMessage } from "@/app/(app)/[emailAccountId]/mail/latest-shown-message";
+import { useHiddenDraftMessageIds } from "@/hooks/useHiddenDraftMessageIds";
+import { useChat } from "@/providers/ChatProvider";
 import { parseAsString, useQueryState, useQueryStates } from "nuqs";
 import { ChevronLeftIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -71,6 +75,11 @@ import { useOptionalMailClient } from "@inboxzero/mail-react/MailEngineProvider"
 import { MailProductFrame } from "@inboxzero/mail-ui/MailProductFrame";
 import { MailEngineConnectionBanner } from "@/utils/mail-engine/MailEngineConnectionBanner";
 import { useThreadSelection } from "@/app/(app)/[emailAccountId]/mail/use-thread-selection";
+import {
+  bundleInboxThreads,
+  isBundleEligibleSplit,
+} from "@/app/(app)/[emailAccountId]/mail/inbox-bundles";
+import { isOtpThread } from "@/app/(app)/[emailAccountId]/mail/otp-code";
 import {
   copySelectedThreadText,
   findSelectAllReader,
@@ -155,7 +164,7 @@ export function MailShell() {
   const { userLabels: allLabels, mutate: mutateLabels } = useLabels();
   const { folders } = useFolders(provider);
   const { data: settings, mutate: mutateSettings } = useMailSettings();
-  const { toggleSidebar } = useSidebar();
+  const { toggleSidebar, state: sidebarState } = useSidebar();
   const isPaletteOpen = useAtomValue(commandPaletteOpenAtom);
   const isHelpOpen = useAtomValue(shortcutsDialogOpenAtom);
   const setIsHelpOpen = useSetAtom(shortcutsDialogOpenAtom);
@@ -232,6 +241,7 @@ export function MailShell() {
   const layout: MailLayoutMode =
     settings?.layout === MailLayout.SPLIT ? "split" : "list";
   const expandedPreview = settings?.expandedPreview ?? false;
+  const bundleInbox = settings?.bundleInbox ?? false;
 
   // Written through the SWR cache rather than mirrored in local state, so the
   // preference has one source of truth and every reader sees the new value.
@@ -240,7 +250,7 @@ export function MailShell() {
       if (!settings) return;
       const loadedSettings = settings;
 
-      mutateSettings(
+      return mutateSettings(
         async (current) => {
           const result = await updateMailPreferencesAction(
             emailAccountId,
@@ -281,6 +291,13 @@ export function MailShell() {
     () => updatePreferences({ expandedPreview: !expandedPreview }),
     [expandedPreview, updatePreferences],
   );
+
+  const toggleBundleInbox = useCallback(async () => {
+    const enabling = !bundleInbox;
+    await updatePreferences({ bundleInbox: enabling });
+    // Turning bundling on picks default splits on the server.
+    if (enabling) mutateSettings();
+  }, [bundleInbox, mutateSettings, updatePreferences]);
 
   // A sidebar selection scopes the whole list, which replaces the split tabs —
   // splits are a way of slicing the inbox, not of slicing an arbitrary view.
@@ -380,6 +397,8 @@ export function MailShell() {
         ...split,
         deletable: split.filters.length > 0,
         reorderable: split.id !== "all" && split.id !== OTHER_SPLIT_ID,
+        bundleEligible:
+          split.id !== OTHER_SPLIT_ID && isBundleEligibleSplit(split),
       })),
     [splits],
   );
@@ -439,10 +458,48 @@ export function MailShell() {
   const { isSyncing } = isAllAccounts
     ? combinedThreadState
     : accountThreadState;
-  const { threads, archive: optimisticArchive } = useOptimisticArchive(
-    searchSettled ? remoteThreads : EMPTY_SEARCH_THREADS,
-    isAllAccounts ? !searchQuery : threadListQueryRequiresInbox(query),
-    JSON.stringify([emailAccountId, isAllAccounts]),
+  const { threads: listedThreads, archive: optimisticArchive } =
+    useOptimisticArchive(
+      searchSettled ? remoteThreads : EMPTY_SEARCH_THREADS,
+      isAllAccounts ? !searchQuery : threadListQueryRequiresInbox(query),
+      JSON.stringify([emailAccountId, isAllAccounts]),
+    );
+  const isInboxView =
+    !isAllAccounts &&
+    !searchQuery &&
+    !scopeQuery &&
+    !!activeSplit &&
+    !activeSplit.filters.length &&
+    activeSplit.id !== OTHER_SPLIT_ID;
+  const [expandedBundleIds, setExpandedBundleIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const toggleBundle = useCallback((bundleId: string) => {
+    setExpandedBundleIds((current) => {
+      const next = new Set(current);
+      if (!next.delete(bundleId)) next.add(bundleId);
+      return next;
+    });
+  }, []);
+  const { rows: threads, rowBundles } = useMemo(
+    () =>
+      bundleInbox && isInboxView
+        ? bundleInboxThreads({
+            threads: listedThreads,
+            splits: settings?.splits ?? [],
+            expandedBundleIds,
+            // A sign-in code is wanted now, so it never waits inside a bundle.
+            keepVisible: (thread) => isOtpThread(thread, userLabels),
+          })
+        : { rows: listedThreads, rowBundles: undefined },
+    [
+      bundleInbox,
+      isInboxView,
+      listedThreads,
+      settings?.splits,
+      expandedBundleIds,
+      userLabels,
+    ],
   );
   const searchViewIdentity = JSON.stringify([
     emailAccountId,
@@ -520,7 +577,7 @@ export function MailShell() {
   });
   const focusedThread = threads[clampedIndex];
   const openThread = openThreadKey
-    ? threads.find((thread) => getListThreadKey(thread) === openThreadKey)
+    ? listedThreads.find((thread) => getListThreadKey(thread) === openThreadKey)
     : undefined;
   const readAttemptedForOpenThread = useRef<string | null>(null);
   const warmThread = useWarmNeighbourThreads({
@@ -563,6 +620,22 @@ export function MailShell() {
   const openMessages = readerSelectionSettled
     ? (openThreadData?.thread.messages ?? NO_MESSAGES)
     : NO_MESSAGES;
+  const { setAmbientContext } = useChat();
+  const hiddenDraftMessageIds = useHiddenDraftMessageIds(emailAccountId);
+  const currentChatMessage =
+    openThreadSelection?.emailAccountId === emailAccountId && !openThreadError
+      ? latestShownMessage(openMessages, hiddenDraftMessageIds)
+      : undefined;
+  useEffect(() => {
+    const parsedContext = currentChatMessage
+      ? emailMessageContextSchema.safeParse({
+          type: "email",
+          message: currentChatMessage,
+        })
+      : null;
+    setAmbientContext(parsedContext?.success ? parsedContext.data : null);
+    return () => setAmbientContext(null);
+  }, [currentChatMessage, setAmbientContext]);
   const openExternalUrl = useMemo(() => {
     const message = openMessages.at(-1);
     if (!message || !readerEmailAccount) return;
@@ -655,7 +728,7 @@ export function MailShell() {
       !selection.hasSelection
     )
       return [];
-    const listTargets = threads.map((thread) => ({
+    const listTargets = listedThreads.map((thread) => ({
       key: getListThreadKey(thread),
       messages: thread.messages,
       selection: getListThreadSelection(thread, emailAccountId),
@@ -669,13 +742,40 @@ export function MailShell() {
           }
         : undefined;
 
-    return resolveThreadActionTargets({
+    const targets = resolveThreadActionTargets({
       focusedKey: focusedThread ? getListThreadKey(focusedThread) : undefined,
       listTargets,
       openTarget,
       selectedKeys: [...selection.selectedIds],
     });
+    if (!rowBundles) return targets;
+    // A collapsed bundle row acts on every thread it stands for.
+    const targetsByKey = new Map(
+      listTargets.map((target) => [target.key, target]),
+    );
+    return [
+      ...new Map(
+        targets
+          .flatMap((target) => {
+            const bundleRow = rowBundles.get(target.key);
+            // An open email acts alone only when it's the implicit target;
+            // a selected bundle row always means the whole bundle.
+            if (
+              bundleRow?.kind !== "collapsed" ||
+              (target.key === openThreadKey && !selection.hasSelection)
+            )
+              return [target];
+            return bundleRow.bundle.threads.flatMap((thread) => {
+              const memberTarget = targetsByKey.get(getListThreadKey(thread));
+              return memberTarget ? [memberTarget] : [];
+            });
+          })
+          .map((target) => [target.key, target]),
+      ).values(),
+    ];
   }, [
+    listedThreads,
+    rowBundles,
     emailAccountId,
     focusedThread,
     openReaderThreadKey,
@@ -687,7 +787,6 @@ export function MailShell() {
     openThreadSelection,
     readerTarget,
     selection.selectedIds,
-    threads,
   ]);
   // Undo brings the thread back into the list, so return focus to it, and to
   // the reader if one is showing, rather than leaving it where archive advanced.
@@ -734,11 +833,13 @@ export function MailShell() {
     setStarredState,
     snooze,
     undo,
+    waitForPendingUndoable,
   } = useThreadActions({
     emailAccountId,
     onRestore: focusRestoredThread,
     readerTarget,
-    threads,
+    // Collapsed bundles hide their threads from the rows, not from actions.
+    threads: listedThreads,
   });
   const markRead = useCallback(
     (threadKeys: string[]) => setReadState(threadKeys, true, false),
@@ -822,8 +923,13 @@ export function MailShell() {
   );
 
   const getOpenThreadKey = useStableCallback(() => openThreadKey);
+  const getFocusedIndex = useStableCallback(() => focusedIndex);
+  /** Where the reader landed: an opened row, a bundle row it closed on, or nothing. */
   const advanceReaderPast = useStableCallback(
-    (currentThreadKey: string, removedThreadKeys: string[]) => {
+    (
+      currentThreadKey: string,
+      removedThreadKeys: string[],
+    ): { openedKey: string } | { bundleIndex: number } | null => {
       const nextThread = getNextThreadAfterRemoval({
         threadIds: orderedIds,
         currentThreadId: currentThreadKey,
@@ -834,10 +940,15 @@ export function MailShell() {
       const nextRow = threads.find(
         (thread) => getListThreadKey(thread) === nextThread?.id,
       );
+      // A bundle row is not one email, so the reader closes on it.
+      const opensRow =
+        nextRow &&
+        rowBundles?.get(getListThreadKey(nextRow))?.kind !== "collapsed";
       setOpenThread(
-        nextRow ? getListThreadSelection(nextRow, emailAccountId) : null,
+        opensRow ? getListThreadSelection(nextRow, emailAccountId) : null,
       );
-      return nextRow ? getListThreadKey(nextRow) : null;
+      if (opensRow) return { openedKey: getListThreadKey(nextRow) };
+      return nextRow && nextThread ? { bundleIndex: nextThread.index } : null;
     },
   );
   const runOn = useStableCallback(
@@ -858,22 +969,24 @@ export function MailShell() {
       }
       // Advance before the list drops the row, so focus moves straight to
       // the next row instead of briefly landing on none.
-      const advancedToKey =
+      const advancedTo =
         removedOpenThreadKey && autoAdvanceReader
           ? advanceReaderPast(removedOpenThreadKey, ids)
-          : undefined;
+          : null;
       const queuedThreadKeys = await action(ids);
       const queuedOpenThread =
         removedOpenThreadKey !== null &&
         queuedThreadKeys.includes(removedOpenThreadKey);
       // If it didn't queue, go back, unless the user has since moved on.
-      // A closed reader can't tell staying put from navigating away.
-      if (
-        removedOpenThreadKey &&
-        advancedToKey &&
-        !queuedOpenThread &&
-        getOpenThreadKey() === advancedToKey
-      ) {
+      // A reader closed on a bundle row has stayed put while focus has too;
+      // one closed for any other reason can't tell staying from leaving.
+      const stayedWhereAdvanced =
+        advancedTo !== null &&
+        ("openedKey" in advancedTo
+          ? getOpenThreadKey() === advancedTo.openedKey
+          : getOpenThreadKey() === null &&
+            getFocusedIndex() === advancedTo.bundleIndex);
+      if (removedOpenThreadKey && !queuedOpenThread && stayedWhereAdvanced) {
         setFocusedIndex(focusedIndex);
         setOpenThread(openThreadSelection);
       }
@@ -900,11 +1013,38 @@ export function MailShell() {
   const openAt = useStableCallback((index: number) => {
     const thread = threads[index];
     if (!thread) return;
+    const bundleRow = rowBundles?.get(getListThreadKey(thread));
+    if (bundleRow?.kind === "collapsed") {
+      // The selection held the bundle; once expanded it would mean one member.
+      selection.clear();
+      setOpenThread(null);
+      setFocusedIndex(index);
+      toggleBundle(bundleRow.bundle.id);
+      return;
+    }
     setFocusedIndex(index);
     setReplyToMessageId(undefined);
     setForwardToMessageId(undefined);
     selection.clear();
     setOpenThread(getListThreadSelection(thread, emailAccountId));
+  });
+
+  const collapseBundle = useStableCallback((bundleId: string) => {
+    const members = [...(rowBundles?.values() ?? [])].find(
+      (row) => row.bundle.id === bundleId,
+    )?.bundle.threads;
+    const leadIndex = members?.[0]
+      ? orderedIds.indexOf(getListThreadKey(members[0]))
+      : -1;
+    // The members are about to be hidden, so the reader can't stay on one.
+    if (
+      openThreadKey &&
+      members?.some((thread) => getListThreadKey(thread) === openThreadKey)
+    )
+      setOpenThread(null);
+    selection.clear();
+    if (leadIndex >= 0) setFocusedIndex(leadIndex);
+    toggleBundle(bundleId);
   });
 
   const move = useCallback(
@@ -918,10 +1058,18 @@ export function MailShell() {
       if ((layout === "split" || openThreadId) && nextThread) {
         setReplyToMessageId(undefined);
         setForwardToMessageId(undefined);
-        setOpenThread(getListThreadSelection(nextThread, emailAccountId));
+        // A bundle row is not one email, so the reader shows nothing for it.
+        const isBundleRow =
+          rowBundles?.get(getListThreadKey(nextThread))?.kind === "collapsed";
+        setOpenThread(
+          isBundleRow
+            ? null
+            : getListThreadSelection(nextThread, emailAccountId),
+        );
       }
     },
     [
+      rowBundles,
       clampIndex,
       clampedIndex,
       threads,
@@ -1153,6 +1301,7 @@ export function MailShell() {
     return () => setMailCommandContext(null);
   }, [mailCommandContext, setMailCommandContext]);
   const isMailOverlayOpen =
+    sidebarState.includes("chat-sidebar") ||
     isHelpOpen ||
     isPaletteOpen ||
     Boolean(labelPicker) ||
@@ -1349,6 +1498,7 @@ export function MailShell() {
           : undefined,
       translate: isMailOverlayOpen ? undefined : translateOpenThread,
       undo: async () => {
+        await waitForPendingUndoable();
         if (await undoLatestToast()) return;
         await undo();
       },
@@ -1384,7 +1534,7 @@ export function MailShell() {
   // person's name into an address instead of guessing a domain.
   const getSplitSenders = useStableCallback(() => {
     const seen = new Set<string>();
-    for (const thread of threads) {
+    for (const thread of listedThreads) {
       const from = thread.messages.at(-1)?.headers.from;
       const address = from ? extractEmailAddress(from) : null;
       if (address && address !== userEmail) seen.add(address);
@@ -1613,6 +1763,10 @@ export function MailShell() {
                 onToggleLayout={toggleLayout}
                 expandedPreview={expandedPreview}
                 onTogglePreview={togglePreview}
+                bundleInbox={bundleInbox}
+                onToggleBundleInbox={
+                  isInboxView ? toggleBundleInbox : undefined
+                }
                 onToggleAssistant={onToggleAssistant}
                 selectAll={showSplitTabs ? null : selectAllCheckbox}
                 selectedCount={selection.selectedCount}
@@ -1715,6 +1869,8 @@ export function MailShell() {
                           scopeType === "sent" && !isAllAccounts
                         }
                         onScrolledChange={setIsListScrolled}
+                        rowBundles={rowBundles}
+                        onToggleBundle={collapseBundle}
                         listKey={
                           isAllAccounts
                             ? `all-accounts:${searchQuery ?? displayedActiveSplitId}`

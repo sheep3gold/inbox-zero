@@ -111,6 +111,8 @@ export type ClaimedWork =
   | {
       kind: "hydrate";
       jobId: string;
+      /** Every job this request answers, `jobId` included. */
+      jobIds?: string[];
       attemptId: string;
       session: AccountSession;
       keys: MessageKey[];
@@ -290,6 +292,8 @@ export interface MailStore {
   enqueueHydration(input: {
     keys: MessageKey[];
     purpose: "metadata" | "body";
+    /** Someone is waiting to read these, so they go before other work. */
+    priority?: "interactive";
   }): Promise<LocalRevision>;
   enqueueSearch(input: {
     accountId: string;
@@ -395,6 +399,13 @@ export interface MailStore {
     accountIds: string[];
     nowMs: number;
   }): Promise<void>;
+  /**
+   * Frees read-only jobs (hydration, search) still claimed by this owner from
+   * an earlier run that stopped mid-request, so they run again at once
+   * instead of after the lease. Commands keep their leases, since running
+   * one twice could send twice.
+   */
+  releaseReadOnlyClaims(input: { ownerId: string }): Promise<void>;
   saveDraft(input: SaveDraft): Promise<DraftSaveResult>;
   settleAttempt(input: {
     attemptId: string;

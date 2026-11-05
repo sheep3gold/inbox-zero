@@ -535,9 +535,13 @@ export const saveComposeDraftAction = actionClient
         provider: providerName,
         logger,
       });
+      const { composeSessionId, ...draft } = parsedInput;
       const saved = await saveComposeDraft({
         provider,
-        ...parsedInput,
+        ...draft,
+        ...(composeSessionId
+          ? { composeSession: { id: composeSessionId, emailAccountId, logger } }
+          : {}),
       });
       return saved;
     },
