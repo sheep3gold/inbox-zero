@@ -47,7 +47,12 @@ COPY scripts/pnpm-install-without-desktop.sh scripts/pnpm-install-without-deskto
 # peer dependency boundaries. Skip @inboxzero/desktop so the image does not
 # download Electron.
 RUN pnpm config set network-concurrency 8 && pnpm config set fetch-timeout 180000 && chmod +x scripts/pnpm-install-without-desktop.sh \
- && ./scripts/pnpm-install-without-desktop.sh --frozen-lockfile --prefer-offline --config.node-linker=hoisted
+ && for attempt in 1 2 3; do \
+      if NODE_USE_ENV_PROXY=1 ./scripts/pnpm-install-without-desktop.sh --frozen-lockfile --prefer-offline --config.node-linker=hoisted; then exit 0; fi; \
+      if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+      echo "Dependency download failed; retrying with cached packages in 10 seconds" >&2; \
+      sleep 10; \
+    done
 
  # Copy the full repo
 COPY . .
